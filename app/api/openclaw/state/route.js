@@ -1,27 +1,25 @@
 import { NextResponse } from 'next/server';
-import { getState, getConnectedAgents, getRecentEvents } from '../../../lib/gameStore';
+import { getServerEngine } from '../../../lib/serverEngine';
 
 export async function GET() {
-    const state = getState();
-    const agents = getConnectedAgents();
-    const recentEvents = getRecentEvents(20);
+    const engine = getServerEngine();
+    const state = engine.getFullState();
 
     return NextResponse.json({
-        score: state?.score || { home: 0, away: 0 },
-        ballHolder: state?.ballHolder || null,
-        agents: agents.map(a => ({
-            agentId: a.agentId,
+        matchPhase: state.matchInfo.phase,
+        score: state.matchScore,
+        ball: state.ball,
+        agents: state.agents.map(a => ({
             name: a.name,
-            role: a.role,
             team: a.team,
             position: a.position,
+            col: a.col,
+            row: a.row,
+            hasBall: a.hasBall,
+            isExternal: a.isExternal,
         })),
-        recentEvents: recentEvents.map(e => ({
-            id: e.id,
-            type: e.type,
-            timestamp: e.timestamp,
-            ...e,
-        })),
-        updatedAt: state?.updatedAt || null,
+        matchInfo: state.matchInfo,
+        stats: state.stats,
+        tick: state.tick,
     });
 }

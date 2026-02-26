@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAgent, queueAction } from '../../../lib/gameStore';
+import { getServerEngine } from '../../../lib/serverEngine';
 
 const VALID_ACTIONS = ['pass', 'shoot', 'dribble', 'tackle'];
 
@@ -22,7 +22,9 @@ export async function POST(request) {
             );
         }
 
-        const agent = getAgent(agentId);
+        const engine = getServerEngine();
+        const agent = engine.externalAgents.get(agentId);
+
         if (!agent) {
             return NextResponse.json(
                 { error: 'Agent not found. Connect first via /api/openclaw/connect' },
@@ -30,20 +32,14 @@ export async function POST(request) {
             );
         }
 
-        if (agent.role !== 'player') {
-            return NextResponse.json(
-                { error: 'Only players can perform game actions. Spectators cannot.' },
-                { status: 403 }
-            );
-        }
-
-        const queued = queueAction({ agentId, action, target: target || null });
+        // Process action directly on server engine
+        engine.processAgentAction({ agentId, action, target: target || null });
 
         return NextResponse.json({
-            status: 'queued',
-            action: queued.action,
-            agentName: queued.agentName,
-            timestamp: queued.timestamp,
+            status: 'executed',
+            action,
+            agentName: agent.name,
+            timestamp: Date.now(),
         });
     } catch (error) {
         return NextResponse.json(

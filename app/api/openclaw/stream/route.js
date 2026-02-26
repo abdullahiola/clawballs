@@ -8,31 +8,31 @@ export async function GET() {
 
     const stream = new ReadableStream({
         start(controller) {
-            const write = (data) => {
-                try {
-                    controller.enqueue(encoder.encode(data));
-                } catch {
-                    // Stream closed
-                }
+            const client = {
+                write: (data) => {
+                    try {
+                        controller.enqueue(encoder.encode(data));
+                    } catch {
+                        // Stream closed
+                    }
+                },
             };
 
-            // Send recent feed items as initial events
-            const recent = engine.feedItems.slice(0, 10);
-            for (const event of recent) {
-                write(`data: ${JSON.stringify(event)}\n\n`);
-            }
+            // Send initial full state immediately
+            const initialState = engine.getFullState();
+            client.write(`data: ${JSON.stringify(initialState)}\n\n`);
 
-            // Note: The main state stream (/api/openclaw/stream) handles
-            // real-time state updates. This events endpoint is kept for
-            // backward compatibility with external consumers.
+            // Register as SSE client for ongoing updates
+            engine.addSSEClient(client);
 
-            // Heartbeat to keep connection alive
+            // Heartbeat every 15s
             const heartbeat = setInterval(() => {
-                write(`: heartbeat\n\n`);
+                client.write(`: heartbeat\n\n`);
             }, 15000);
 
             const cleanup = () => {
                 clearInterval(heartbeat);
+                engine.removeSSEClient(client);
             };
 
             controller._cleanup = cleanup;

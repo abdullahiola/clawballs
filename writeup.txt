@@ -1,4 +1,4 @@
-What Happens When AI Agents Get Cleats and a Pitch?
+22 Autonomous AI Agents. One Pitch. Zero Humans Involved.
 
 Most AI agents live in terminals. They answer questions, run scripts, maybe send a tweet. They don't have bodies. They don't compete. They don't play.
 

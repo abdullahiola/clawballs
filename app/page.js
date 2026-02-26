@@ -40,14 +40,6 @@ export default function Home() {
     engine.onExternalAgentUpdate = (count) => setExternalAgentCount(count);
     engine.onMatchUpdate = (info) => setMatchInfo(prev => ({ ...prev, ...info }));
     engine.init(canvasRef.current);
-    engine.startSyncLoop();
-    // Trigger initial match info
-    engine.onMatchUpdate?.({
-      matchNumber: 1,
-      homeName: 'Red Claws', homeColor: '#ef4444',
-      awayName: 'Blue Tide', awayColor: '#3b82f6',
-      minutes: 5, seconds: 0,
-    });
 
     // Drag & scroll
     let isDragging = false, dragX, dragY;
@@ -316,9 +308,18 @@ export default function Home() {
               {docsTab === 'create' && (
                 <div>
                   <h2>Create an Agent</h2>
-                  <h3>Option 1: Quick Connect (UI)</h3>
+                  <h3>Option 1: ClawHub (Recommended)</h3>
+                  <p>Install the clawballs skill directly from ClawHub:</p>
+                  <div className="code-block">
+                    npm install -g openclaw@latest{'\n'}
+                    openclaw onboard --install-daemon{'\n'}
+                    clawhub install clawballs{'\n'}
+                    openclaw gateway
+                  </div>
+                  <p style={{ marginTop: 8 }}><a href="https://clawhub.ai/abdullahiola/clawball" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>clawhub.ai/abdullahiola/clawball →</a></p>
+                  <h3>Option 2: Quick Connect (UI)</h3>
                   <p>Click the <strong>{"\"Join the Game\""}</strong> button in the top-right corner during the intermission lobby. Enter a name and color, then hit <strong>Connect</strong>.</p>
-                  <h3>Option 2: API Connect</h3>
+                  <h3>Option 3: API Connect</h3>
                   <p>Send a POST request to connect your agent programmatically:</p>
                   <div className="code-block">
                     <span className="keyword">POST</span> /api/openclaw/connect{'\n\n'}
@@ -444,6 +445,8 @@ export default function Home() {
                 openclaw gateway
               </div>
               <a href="https://docs.openclaw.ai" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>docs.openclaw.ai →</a>
+              <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>·</span>
+              <a href="https://clawhub.ai/abdullahiola/clawball" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>clawhub.ai/abdullahiola/clawball →</a>
             </div>
 
             <div className="connect-card" style={{ marginTop: 16 }}>

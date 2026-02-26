@@ -122,151 +122,27 @@ class Agent {
         const P = CONFIG.PITCH;
         return { col: Math.max(P.startCol + 0.5, Math.min(P.endCol - 0.5, c)), row: Math.max(P.startRow + 0.5, Math.min(P.endRow - 0.5, r)) };
     }
-    update(ball, allAgents) {
-        const P = CONFIG.PITCH;
-        if (this.actionCooldown > 0) this.actionCooldown--;
-        this.stateTimer--;
-        if (this.hasBall) this.state = 'dribbling';
-
-        // ===== GOALKEEPER — fixed position, only tracks ball laterally =====
-        if (this.position === 'GK') {
-            if (ball) {
-                // Track ball row but stay near goal line
-                const goalCol = this.team === 'home' ? P.startCol + 1.5 : P.endCol - 1.5;
-                const targetRow = Math.max(P.startRow + (P.endRow - P.startRow) * 0.3,
-                    Math.min(P.endRow - (P.endRow - P.startRow) * 0.3,
-                        ball.holder ? lerp(ball.holder.prevRow, ball.holder.targetRow, ball.holder.moveProgress) : ball.targetRow));
-                if (!this.hasBall) {
-                    this.prevCol = this.col; this.prevRow = this.row;
-                    this.targetCol = goalCol;
-                    this.targetRow = targetRow;
-                    this.moveProgress = 0;
-                    this.state = 'moving';
-                }
-            }
-            // Update position smoothly
-            if (this.state === 'moving' || this.state === 'dribbling') {
-                this.moveProgress += 0.03;
-                if (this.moveProgress >= 1) {
-                    this.moveProgress = 1; this.col = this.targetCol; this.row = this.targetRow;
-                    this.state = this.hasBall ? 'dribbling' : 'idle'; this.stateTimer = rand(10, 30);
-                }
-            }
-            const cc = lerp(this.prevCol, this.targetCol, this.moveProgress);
-            const cr = lerp(this.prevRow, this.targetRow, this.moveProgress);
-            const iso = toIso(cc, cr);
-            this.drawX = lerp(this.drawX, iso.x, 0.12);
-            this.drawY = lerp(this.drawY, iso.y, 0.12);
-            return;
-        }
-
-        // ===== OUTFIELD PLAYERS — formation-aware movement =====
-        const teamHasBall = ball && ball.holder && ball.holder.team === this.team;
-        const oppHasBall = ball && ball.holder && ball.holder.team !== this.team;
-        const ballCol = ball ? (ball.holder ? lerp(ball.holder.prevCol, ball.holder.targetCol, ball.holder.moveProgress) : ball.targetCol) : this.homeCol;
-        const ballRow = ball ? (ball.holder ? lerp(ball.holder.prevRow, ball.holder.targetRow, ball.holder.moveProgress) : ball.targetRow) : this.homeRow;
-        const pitchW = P.endCol - P.startCol;
-
-        if (this.state === 'idle' && this.stateTimer <= 0) {
-            let goalCol, goalRow;
-
-            if (teamHasBall && !this.hasBall) {
-                // ===== ATTACKING MOVEMENT — make support runs =====
-                const attackDir = this.team === 'home' ? 1 : -1;
-                const isDefender = ['LB', 'CB'].includes(this.position);
-                const isMidfielder = ['LM', 'CM', 'RM'].includes(this.position);
-                const isStriker = this.position === 'ST';
-
-                if (isDefender) {
-                    // Defenders hold shape, shift slightly toward ball
-                    goalCol = this.homeCol + attackDir * 2;
-                    goalRow = this.homeRow + (ballRow - this.homeRow) * 0.15;
-                } else if (isMidfielder) {
-                    // Midfielders push forward and spread wide
-                    goalCol = this.homeCol + attackDir * (3 + Math.random() * 3);
-                    goalRow = this.homeRow + (Math.random() - 0.5) * 8;
-                    // Support run: move toward open space between ball and goal
-                    if (Math.random() < 0.3) {
-                        const goalTarget = this.team === 'home' ? P.endCol : P.startCol;
-                        goalCol = lerp(ballCol, goalTarget, 0.3 + Math.random() * 0.3);
-                    }
-                } else if (isStriker) {
-                    // Strikers make aggressive runs toward goal
-                    const goalTarget = this.team === 'home' ? P.endCol : P.startCol;
-                    goalCol = lerp(ballCol, goalTarget, 0.5 + Math.random() * 0.4);
-                    goalRow = this.homeRow + (Math.random() - 0.5) * 10;
-                    // Diagonal runs
-                    if (Math.random() < 0.4) {
-                        goalRow = ballRow + (Math.random() - 0.5) * 12;
-                    }
-                } else {
-                    goalCol = this.homeCol + rand(-2, 2);
-                    goalRow = this.homeRow + rand(-2, 2);
-                }
-            } else if (oppHasBall) {
-                // ===== DEFENSIVE MOVEMENT — track ball, compress shape =====
-                const retreatDir = this.team === 'home' ? -1 : 1;
-                const isDefender = ['LB', 'CB'].includes(this.position);
-                const isMidfielder = ['LM', 'CM', 'RM'].includes(this.position);
-
-                if (isDefender) {
-                    // Defenders track ball row and retreat
-                    goalCol = this.homeCol + retreatDir * 1;
-                    goalRow = this.homeRow + (ballRow - this.homeRow) * 0.25;
-                } else if (isMidfielder) {
-                    // Midfielders drop back to help defense
-                    goalCol = this.homeCol + retreatDir * 2;
-                    goalRow = this.homeRow + (ballRow - this.homeRow) * 0.2;
-                } else {
-                    // Strikers stay forward but drift toward ball side
-                    goalCol = this.homeCol;
-                    goalRow = this.homeRow + (ballRow - this.homeRow) * 0.15;
-                }
-            } else {
-                // ===== NEUTRAL — return toward formation with small jitter =====
-                goalCol = this.homeCol + rand(-2, 2);
-                goalRow = this.homeRow + rand(-2, 2);
-            }
-
-            const d = this.clamp(goalCol, goalRow);
-            this.prevCol = this.col; this.prevRow = this.row;
-            this.targetCol = d.col; this.targetRow = d.row;
-            this.moveProgress = 0;
-            this.state = 'moving';
-            this.stateTimer = rand(40, 100);
-        }
-
-        // Movement speed varies by situation
-        if (this.state === 'moving' || this.state === 'dribbling') {
-            let speed = 0.02 + Math.random() * 0.008;
-            if (this.hasBall) speed = 0.025;
-            if (oppHasBall && distBetween(this, { col: ballCol, row: ballRow }) < 8) speed = 0.035; // Sprint to press
-            this.moveProgress += speed;
-            if (this.moveProgress >= 1) {
-                this.moveProgress = 1; this.col = this.targetCol; this.row = this.targetRow;
-                this.state = this.hasBall ? 'dribbling' : 'idle'; this.stateTimer = rand(20, 80);
-            }
-        }
-
-        // ===== PRESSING — chase opponent with ball =====
-        if (oppHasBall && !this.hasBall && this.actionCooldown <= 0) {
-            const dist = distBetween(this, ball.holder);
-            // Nearest players press harder
-            const isDefender = ['LB', 'CB', 'GK'].includes(this.position);
-            const pressRange = isDefender ? 6 : (this.position === 'CM' || this.position === 'LM' || this.position === 'RM' ? 7 : 10);
-            if (dist < pressRange) {
-                this.prevCol = this.col; this.prevRow = this.row;
-                const d = this.clamp(ball.holder.col, ball.holder.row);
-                this.targetCol = d.col; this.targetRow = d.row;
-                this.moveProgress = 0; this.state = 'moving';
-            }
-        }
-
-        const cc = lerp(this.prevCol, this.targetCol, this.moveProgress);
-        const cr = lerp(this.prevRow, this.targetRow, this.moveProgress);
-        const iso = toIso(cc, cr);
-        this.drawX = lerp(this.drawX, iso.x, 0.12);
-        this.drawY = lerp(this.drawY, iso.y, 0.12);
+    // Apply server-authoritative state
+    applyServerState(serverAgent) {
+        this.col = serverAgent.col;
+        this.row = serverAgent.row;
+        this.targetCol = serverAgent.targetCol;
+        this.targetRow = serverAgent.targetRow;
+        this.prevCol = serverAgent.prevCol;
+        this.prevRow = serverAgent.prevRow;
+        this.moveProgress = serverAgent.moveProgress;
+        this.hasBall = serverAgent.hasBall;
+        this.state = serverAgent.state;
+        this.color = serverAgent.color;
+        this.colorDark = serverAgent.colorDark;
+        this.isExternal = serverAgent.isExternal;
+        this.externalId = serverAgent.externalId;
+    }
+    update() {
+        // Client-side: just smoothly interpolate draw position toward server-provided col/row
+        const iso = toIso(this.col, this.row);
+        this.drawX = lerp(this.drawX, iso.x, 0.15);
+        this.drawY = lerp(this.drawY, iso.y, 0.15);
     }
     draw(ctx, ox, oy) {
         const x = this.drawX + ox, y = this.drawY + oy;
@@ -420,20 +296,26 @@ class Ball {
         this.bouncePhase = 0; this.speed = 0.08;
         const iso = toIso(this.col, this.row); this.drawX = iso.x; this.drawY = iso.y;
     }
-    update(agents) {
-        this.bouncePhase += this.free ? 0.04 : 0.1;
-        if (this.holder) {
-            const cc = lerp(this.holder.prevCol, this.holder.targetCol, this.holder.moveProgress);
-            const cr = lerp(this.holder.prevRow, this.holder.targetRow, this.holder.moveProgress);
-            this.targetCol = cc; this.targetRow = cr; this.col = cc; this.row = cr; this.speed = 0.15;
-        } else if (this.free) {
-            let nearest = null, nd = Infinity;
-            for (const a of agents) { const d = distBetween(this, a); if (d < nd) { nd = d; nearest = a; } }
-            if (nearest && nd < 2) { this.holder = nearest; nearest.hasBall = true; this.free = false; }
-            this.speed = 0.06;
+    // Apply server-authoritative state
+    applyServerState(serverBall, agents) {
+        this.col = serverBall.col;
+        this.row = serverBall.row;
+        this.targetCol = serverBall.targetCol;
+        this.targetRow = serverBall.targetRow;
+        this.free = serverBall.free;
+        // Resolve holder reference
+        if (serverBall.holderId != null) {
+            this.holder = agents.find(a => a.id === serverBall.holderId) || null;
+        } else {
+            this.holder = null;
         }
-        const iso = toIso(this.targetCol, this.targetRow);
-        this.drawX = lerp(this.drawX, iso.x, this.speed); this.drawY = lerp(this.drawY, iso.y, this.speed);
+    }
+    update() {
+        // Client-side: just interpolate draw position + animate bounce
+        this.bouncePhase += this.free ? 0.04 : 0.1;
+        const iso = toIso(this.col, this.row);
+        this.drawX = lerp(this.drawX, iso.x, 0.15);
+        this.drawY = lerp(this.drawY, iso.y, 0.15);
     }
     passBall(target) {
         if (this.holder) this.holder.hasBall = false;
@@ -848,34 +730,27 @@ export class GameEngine {
         this.matchScore = { home: 0, away: 0 };
         this.stats = { online: 22, spectators: 0, totalAI: 22, goals: 0, fouls: 0, passes: 0 };
         this.feedItems = [];
-        this.lastEventTime = 0;
         this.onFeedUpdate = onFeedUpdate;
         this.onStatsUpdate = onStatsUpdate;
-        this.onMatchUpdate = null; // callback for match timer/team names
+        this.onMatchUpdate = null;
+        this.onExternalAgentUpdate = null;
         this.canvas = null;
         this.ctx = null;
         this.animFrame = null;
         this.running = false;
-        // Match timer state
-        this.matchStartTime = 0;
-        this.matchTimeRemaining = CONFIG.MATCH_DURATION;
-        this.matchNumber = 1;
-        this.matchEnded = false;
-        this.matchPhase = 'playing'; // 'playing' | 'fulltime' | 'intermission'
-        this.intermissionEndTime = 0;
-        this.nextHomeTeam = null;
-        this.nextAwayTeam = null;
-        this.lastTimerCheck = 0;
+        this.externalAgentCount = 0;
+        // SSE connection
+        this.eventSource = null;
+        this.lastServerState = null;
     }
 
     init(canvas) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
+        // Create initial placeholder agents (will be replaced by server state)
         for (let i = 0; i < CONFIG.AGENTS_PER_TEAM; i++) this.agents.push(new Agent(i, 'home', NAMES_HOME, i));
         for (let i = 0; i < CONFIG.AGENTS_PER_TEAM; i++) this.agents.push(new Agent(CONFIG.AGENTS_PER_TEAM + i, 'away', NAMES_AWAY, i));
         this.ball = new Ball();
-        const starter = pick(this.agents);
-        this.ball.holder = starter; starter.hasBall = true; this.ball.free = false;
         this.generateSpectators();
         this.generateEnvironment();
         const ci = toIso(CONFIG.GRID_SIZE / 2, CONFIG.GRID_SIZE / 2);
@@ -883,18 +758,8 @@ export class GameEngine {
         this.camera.y = -ci.y + window.innerHeight / 2;
         this.camera.targetX = this.camera.x; this.camera.targetY = this.camera.y;
         this.stats.spectators = this.spectators.length;
-        for (let i = 0; i < 8; i++) this.doGameplay();
-        this.onFeedUpdate?.(this.feedItems);
-        this.onStatsUpdate?.(this.stats, this.matchScore);
-        this.lastEventTime = Date.now();
-        this.matchStartTime = Date.now();
-        this.matchEnded = false;
-        this.lastTimerCheck = Date.now();
         this.running = true;
-        this.externalAgents = new Map(); // agentId → Agent instance
-        this.externalAgentCount = 0;
-        this.syncTimer = null;
-        this.onExternalAgentUpdate = null; // callback for UI
+        this.connectToStream();
         this.loop();
     }
 
@@ -930,356 +795,113 @@ export class GameEngine {
     destroy() {
         this.running = false;
         if (this.animFrame) cancelAnimationFrame(this.animFrame);
-        if (this.syncTimer) clearInterval(this.syncTimer);
+        if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
     }
 
-    // ===== MATCH TIMER & RESET =====
+    // ===== SSE CONNECTION TO SERVER =====
 
-    getMatchTime() {
-        const elapsed = Date.now() - this.matchStartTime;
-        const remaining = Math.max(0, CONFIG.MATCH_DURATION - elapsed);
-        const totalSeconds = Math.ceil(remaining / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-        return { remaining, minutes, seconds, elapsed };
+    connectToStream() {
+        if (this.eventSource) this.eventSource.close();
+        this.eventSource = new EventSource('/api/openclaw/stream');
+        this.eventSource.onmessage = (event) => {
+            try {
+                const state = JSON.parse(event.data);
+                this.applyServerState(state);
+            } catch { /* ignore parse errors */ }
+        };
+        this.eventSource.onerror = () => {
+            // Auto-reconnect after 2s
+            if (this.eventSource) this.eventSource.close();
+            this.eventSource = null;
+            setTimeout(() => { if (this.running) this.connectToStream(); }, 2000);
+        };
     }
 
-    // Called when match time expires — announce result, enter lobby
-    beginIntermission() {
-        this.matchEnded = true;
-        this.matchPhase = 'fulltime';
+    applyServerState(state) {
+        this.lastServerState = state;
 
-        // Announce full time
-        const winner = this.matchScore.home > this.matchScore.away
-            ? CONFIG.TEAMS.home.name
-            : this.matchScore.away > this.matchScore.home
-                ? CONFIG.TEAMS.away.name
-                : null;
-        this.addFeed({
-            time: formatTime(),
-            text: `⏱️ <strong>FULL TIME!</strong> Final score: <strong>${this.matchScore.home} - ${this.matchScore.away}</strong>${winner ? ` — <strong>${winner} win!</strong> 🏆` : ' — Draw!'}`,
-            type: 'goals',
-        });
-
-        // Pick next teams
-        const pool = [...CONFIG.TEAM_POOL];
-        const homeIdx = Math.floor(Math.random() * pool.length);
-        this.nextHomeTeam = pool.splice(homeIdx, 1)[0];
-        const awayIdx = Math.floor(Math.random() * pool.length);
-        this.nextAwayTeam = pool.splice(awayIdx, 1)[0];
-
-        // Start intermission countdown
-        this.intermissionEndTime = Date.now() + CONFIG.INTERMISSION_DURATION;
-        this.matchPhase = 'intermission';
-
-        this.addFeed({
-            time: formatTime(),
-            text: `🏟️ <strong>Next up:</strong> <strong>${this.nextHomeTeam.name}</strong> vs <strong>${this.nextAwayTeam.name}</strong> — lobby open for 30s, agents can connect now!`,
-            type: 'goals',
-        });
-
-        this.onMatchUpdate?.({
-            matchNumber: this.matchNumber + 1,
-            homeName: this.nextHomeTeam.name,
-            homeColor: this.nextHomeTeam.colors[0],
-            awayName: this.nextAwayTeam.name,
-            awayColor: this.nextAwayTeam.colors[0],
-            phase: 'intermission',
-            lobbyCountdown: Math.ceil(CONFIG.INTERMISSION_DURATION / 1000),
-        });
-    }
-
-    // Called when intermission ends — create new match
-    kickOffNewMatch() {
-        this.matchNumber++;
-
-        // Apply the pre-selected teams
-        CONFIG.TEAMS.home = { ...this.nextHomeTeam };
-        CONFIG.TEAMS.away = { ...this.nextAwayTeam };
-
-        // Reset scores and stats
-        this.matchScore = { home: 0, away: 0 };
-        this.stats.goals = 0;
-        this.stats.fouls = 0;
-        this.stats.passes = 0;
-
-        // Recreate agents with new colors
-        this.agents = [];
-        for (let i = 0; i < CONFIG.AGENTS_PER_TEAM; i++) {
-            this.agents.push(new Agent(i, 'home', NAMES_HOME, i));
-        }
-        for (let i = 0; i < CONFIG.AGENTS_PER_TEAM; i++) {
-            this.agents.push(new Agent(CONFIG.AGENTS_PER_TEAM + i, 'away', NAMES_AWAY, i));
-        }
-
-        // Re-add external agents
-        for (const [agentId, oldAgent] of this.externalAgents) {
-            if (oldAgent.isExternal) {
-                this.addExternalAgent({
-                    agentId,
-                    name: oldAgent.name,
-                    color: oldAgent.color,
-                    role: 'player',
-                    team: oldAgent.team,
-                    position: oldAgent.position,
-                });
-            }
-        }
-
-        // Reset ball
-        this.ball = new Ball();
-        const starter = pick(this.agents);
-        this.ball.holder = starter; starter.hasBall = true; this.ball.free = false;
-
-        // Reset match timer
-        this.matchStartTime = Date.now();
-        this.matchEnded = false;
-        this.matchPhase = 'playing';
-        this.lastEventTime = Date.now();
-
-        this.stats.online = this.agents.length;
-        this.stats.totalAI = this.agents.length;
-
-        // Announce kick off
-        this.addFeed({
-            time: formatTime(),
-            text: `⚽ <strong>Match ${this.matchNumber}: KICK OFF!</strong> <strong>${this.nextHomeTeam.name}</strong> vs <strong>${this.nextAwayTeam.name}</strong>`,
-            type: 'goals',
-        });
-
-        this.onStatsUpdate?.(this.stats, this.matchScore);
-        this.onMatchUpdate?.({
-            matchNumber: this.matchNumber,
-            homeName: this.nextHomeTeam.name,
-            homeColor: this.nextHomeTeam.colors[0],
-            awayName: this.nextAwayTeam.name,
-            awayColor: this.nextAwayTeam.colors[0],
-            phase: 'playing',
-        });
-
-        this.nextHomeTeam = null;
-        this.nextAwayTeam = null;
-    }
-
-    // ===== SERVER SYNC =====
-
-    startSyncLoop() {
-        if (this.syncTimer) return;
-        this.syncTimer = setInterval(() => this.syncWithServer(), 500);
-    }
-
-    async syncWithServer() {
-        try {
-            const state = this.getStateSnapshot();
-            const res = await fetch('/api/openclaw/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ state, events: [], matchPhase: this.matchPhase }),
+        // Sync agents: rebuild if count changed, otherwise update in place
+        const serverAgents = state.agents || [];
+        if (this.agents.length !== serverAgents.length) {
+            this.agents = serverAgents.map(sa => {
+                const namePool = sa.team === 'home' ? NAMES_HOME : NAMES_AWAY;
+                const posIndex = POSITIONS.indexOf(sa.position);
+                const a = new Agent(sa.id, sa.team, namePool, posIndex >= 0 ? posIndex : 0);
+                a.name = sa.name;
+                a.applyServerState(sa);
+                // Initialize draw position
+                const iso = toIso(sa.col, sa.row);
+                a.drawX = iso.x; a.drawY = iso.y;
+                // External agent glow
+                if (sa.isExternal) {
+                    a.glowPhase = 0;
+                    const originalDraw = a.draw.bind(a);
+                    a.draw = function (ctx, ox, oy) {
+                        const x = this.drawX + ox, y = this.drawY + oy;
+                        const s = this.size * 1.1;
+                        const cy = y - s * 1.5 + Math.sin(Date.now() * 0.004 + this.bobOffset) * 2;
+                        this.glowPhase = (this.glowPhase || 0) + 0.03;
+                        const ga = 0.3 + Math.sin(this.glowPhase) * 0.15;
+                        const gr = s * 3.5 + Math.sin(this.glowPhase * 1.5) * 2;
+                        ctx.save();
+                        ctx.beginPath(); ctx.arc(x, cy, gr, 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(16,185,129,${ga})`; ctx.lineWidth = 2; ctx.stroke();
+                        ctx.beginPath(); ctx.arc(x, cy, gr * 0.85, 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(16,185,129,${ga * 0.5})`; ctx.lineWidth = 1; ctx.stroke();
+                        ctx.restore();
+                        originalDraw(ctx, ox, oy);
+                        ctx.font = "10px sans-serif"; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+                        ctx.fillText('🤖', x, cy - s * 2.8);
+                    };
+                }
+                return a;
             });
-            if (!res.ok) return;
-            const data = await res.json();
-
-            // Process new agent connections
-            if (data.pendingConnections?.length) {
-                for (const conn of data.pendingConnections) {
-                    this.addExternalAgent(conn);
-                }
+        } else {
+            for (let i = 0; i < serverAgents.length; i++) {
+                this.agents[i].applyServerState(serverAgents[i]);
+                this.agents[i].name = serverAgents[i].name;
             }
-
-            // Process queued actions
-            if (data.pendingActions?.length) {
-                for (const action of data.pendingActions) {
-                    this.processAgentAction(action);
-                }
-            }
-        } catch {
-            // Silently fail — sync will retry
-        }
-    }
-
-    getStateSnapshot() {
-        return {
-            score: { ...this.matchScore },
-            ballHolder: this.ball?.holder ? this.ball.holder.name : null,
-            agents: this.agents.map(a => ({
-                name: a.name,
-                team: a.team,
-                position: a.position,
-                col: a.col,
-                row: a.row,
-                hasBall: a.hasBall,
-                isExternal: !!a.isExternal,
-            })),
-            tick: this.tick,
-        };
-    }
-
-    addExternalAgent(agentData) {
-        const { agentId, name, color, role, team, position } = agentData;
-
-        if (role === 'spectator' || !team) {
-            // Add as a spectator with special indicator
-            this.addUserSpectator(name + ' 🤖', color);
-            this.externalAgentCount++;
-            this.onExternalAgentUpdate?.(this.externalAgentCount);
-            return;
         }
 
-        // Add as a player agent
-        const posIndex = POSITIONS.indexOf(position) !== -1 ? POSITIONS.indexOf(position) : rand(0, 10);
-        const namePool = team === 'home' ? NAMES_HOME : NAMES_AWAY;
-        const agent = new Agent(100 + this.agents.length, team, namePool, posIndex);
-        agent.name = name;
-        agent.color = color || (team === 'home' ? CONFIG.TEAMS.home.colors[0] : CONFIG.TEAMS.away.colors[0]);
-        agent.colorDark = agent.color;
-        agent.isExternal = true;
-        agent.externalId = agentId;
-        agent.glowPhase = 0;
+        // Sync ball
+        if (state.ball && this.ball) {
+            this.ball.applyServerState(state.ball, this.agents);
+        }
 
-        // Override draw for external agents (add glow ring + 🤖 badge)
-        const originalDraw = agent.draw.bind(agent);
-        agent.draw = function (ctx, ox, oy) {
-            const x = this.drawX + ox, y = this.drawY + oy;
-            const s = this.size * 1.1;
-            const cy = y - s * 1.5 + Math.sin(Date.now() * 0.004 + this.bobOffset) * 2;
+        // Sync score, stats, feed
+        this.matchScore = state.matchScore || this.matchScore;
+        this.stats = state.stats || this.stats;
+        this.externalAgentCount = state.externalAgentCount || 0;
 
-            // Animated glow ring
-            this.glowPhase = (this.glowPhase || 0) + 0.03;
-            const glowAlpha = 0.3 + Math.sin(this.glowPhase) * 0.15;
-            const glowR = s * 3.5 + Math.sin(this.glowPhase * 1.5) * 2;
+        // Sync feed items from server
+        if (state.feedItems) {
+            this.feedItems = state.feedItems;
+            this.onFeedUpdate?.(this.feedItems);
+        }
 
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(x, cy, glowR, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(16, 185, 129, ${glowAlpha})`;
-            ctx.lineWidth = 2;
-            ctx.stroke();
+        // Sync match info
+        if (state.matchInfo) {
+            const mi = state.matchInfo;
+            CONFIG.TEAMS.home = { name: mi.homeName, colors: [mi.homeColor, mi.homeColor, mi.homeColor] };
+            CONFIG.TEAMS.away = { name: mi.awayName, colors: [mi.awayColor, mi.awayColor, mi.awayColor] };
+            this.onMatchUpdate?.({
+                matchNumber: mi.matchNumber,
+                homeName: mi.homeName,
+                homeColor: mi.homeColor,
+                awayName: mi.awayName,
+                awayColor: mi.awayColor,
+                minutes: mi.minutes,
+                seconds: mi.seconds,
+                phase: mi.phase,
+            });
+        }
 
-            // Inner glow
-            ctx.beginPath();
-            ctx.arc(x, cy, glowR * 0.85, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(16, 185, 129, ${glowAlpha * 0.5})`;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            ctx.restore();
-
-            // Draw normal agent
-            originalDraw(ctx, ox, oy);
-
-            // 🤖 badge above name
-            ctx.font = "10px sans-serif";
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText('🤖', x, cy - s * 2.8);
-        };
-
-        this.agents.push(agent);
-        this.externalAgents.set(agentId, agent);
-        this.externalAgentCount++;
-        this.stats.online = this.agents.length;
-        this.stats.totalAI = this.agents.length;
-
-        this.addFeed({
-            time: formatTime(),
-            text: `🤖 <strong>${name}</strong> joined as a <strong>${team === 'home' ? 'Red Claws' : 'Blue Tide'}</strong> player! (OpenClaw)`,
-            type: 'chat',
-        });
         this.onStatsUpdate?.(this.stats, this.matchScore);
         this.onExternalAgentUpdate?.(this.externalAgentCount);
     }
 
-    processAgentAction(actionData) {
-        const { agentId, action, target } = actionData;
-        const agent = this.externalAgents.get(agentId);
-        if (!agent) return;
-
-        const tm = this.agents.filter(a => a.team === agent.team && a.id !== agent.id);
-        const P = CONFIG.PITCH;
-        const mr = (P.startRow + P.endRow) / 2;
-
-        switch (action) {
-            case 'pass': {
-                if (!this.ball || !agent.hasBall) break;
-                let passTarget;
-                if (target) {
-                    passTarget = this.agents.find(a => a.name === target && a.team === agent.team);
-                }
-                if (!passTarget && tm.length > 0) passTarget = pick(tm);
-                if (passTarget) {
-                    this.ball.passBall(passTarget);
-                    agent.actionCooldown = 60;
-                    this.stats.passes++;
-                    this.addFeed({
-                        time: formatTime(),
-                        text: `🤖 <strong>${agent.name}</strong> passes to <strong>${passTarget.name}</strong>`,
-                        type: 'chat',
-                    });
-                }
-                break;
-            }
-            case 'shoot': {
-                if (!this.ball || !agent.hasBall) break;
-                const gc = agent.team === 'home' ? P.endCol : P.startCol;
-                this.ball.shoot(gc, mr + rand(-2, 2));
-                agent.actionCooldown = 80;
-                if (Math.random() < 0.35) {
-                    this.matchScore[agent.team]++;
-                    this.stats.goals++;
-                    this.addFeed({
-                        time: formatTime(),
-                        text: `🤖 <strong>${agent.name}</strong> <span class="highlight-goal">scores!</span> ⚽🎉 [${this.matchScore.home}-${this.matchScore.away}]`,
-                        type: 'goals',
-                    });
-                    setTimeout(() => this.ball.resetToCenter(), 2000);
-                } else {
-                    this.addFeed({
-                        time: formatTime(),
-                        text: `🤖 <strong>${agent.name}</strong> shoots — ${pick(['saved by the keeper', 'goes wide', 'hits the post', 'blocked'])}!`,
-                        type: 'chat',
-                    });
-                }
-                break;
-            }
-            case 'dribble': {
-                if (!agent.hasBall) break;
-                const dc = agent.team === 'home' ? rand(1, 4) : rand(-4, -1);
-                const nc = Math.max(P.startCol + 1, Math.min(P.endCol - 1, agent.col + dc));
-                const nr = Math.max(P.startRow + 1, Math.min(P.endRow - 1, agent.row + rand(-2, 2)));
-                agent.prevCol = agent.col; agent.prevRow = agent.row;
-                agent.targetCol = nc; agent.targetRow = nr;
-                agent.moveProgress = 0; agent.state = 'dribbling';
-                this.addFeed({
-                    time: formatTime(),
-                    text: `🤖 <strong>${agent.name}</strong> dribbles forward`,
-                    type: 'chat',
-                });
-                break;
-            }
-            case 'tackle': {
-                if (!this.ball?.holder || this.ball.holder.team === agent.team) break;
-                const ballHolder = this.ball.holder;
-                if (distBetween(agent, ballHolder) < 6) {
-                    if (Math.random() < 0.5) {
-                        this.ball.loose(ballHolder.col, ballHolder.row);
-                        agent.actionCooldown = 40;
-                        this.addFeed({
-                            time: formatTime(),
-                            text: `🤖 <strong>${agent.name}</strong> tackles <strong>${ballHolder.name}</strong> cleanly! 💪`,
-                            type: 'chat',
-                        });
-                    } else {
-                        this.addFeed({
-                            time: formatTime(),
-                            text: `🤖 <strong>${agent.name}</strong> attempts tackle on <strong>${ballHolder.name}</strong> — missed!`,
-                            type: 'chat',
-                        });
-                    }
-                }
-                break;
-            }
-        }
-        this.onStatsUpdate?.(this.stats, this.matchScore);
-    }
+    // Kept for backward compat but no longer used for simulation
+    startSyncLoop() { /* no-op — SSE handles sync now */ }
 
     generateSpectators() {
         const { PITCH } = CONFIG; const S = CONFIG.STADIUM; let id = 0;
@@ -1364,255 +986,7 @@ export class GameEngine {
         const spec = new Spectator(this.spectators.length, pos.col, pos.row, color, true, name);
         this.spectators.push(spec);
         this.stats.spectators = this.spectators.length;
-        this.addFeed({ time: formatTime(), text: `<strong>${name}</strong> joined the stadium as a spectator! 🦞🎉`, type: 'chat' });
-        this.onStatsUpdate?.(this.stats, this.matchScore);
         return spec;
-    }
-
-    addFeed(item) {
-        item.id = Date.now() + Math.random();
-        this.feedItems.unshift(item);
-        if (this.feedItems.length > CONFIG.FEED_MAX_ITEMS) this.feedItems.pop();
-        this.onFeedUpdate?.(this.feedItems);
-    }
-
-    // ===== CENTRALIZED SHOT RESOLUTION =====
-    attemptShot(shooter, shotType) {
-        const P = CONFIG.PITCH;
-        const mr = (P.startRow + P.endRow) / 2;
-        const gc = shooter.team === 'home' ? P.endCol : P.startCol;
-        const dtg = Math.abs(shooter.col - gc);
-
-        // Fire the ball toward objective
-        this.ball.shoot(gc, mr + rand(-2, 2));
-        shooter.actionCooldown = 80;
-
-        // Find opponent goalkeeper
-        const oppGK = this.agents.find(a => a.team !== shooter.team && a.position === 'GK');
-
-        // Base goal chance by distance (calibrated for ~2-4 goals per 5-min match)
-        let goalChance;
-        if (shotType === 'longrange') {
-            goalChance = 0.06; // ~6% for long-range
-        } else if (dtg < 4) {
-            goalChance = 0.22; // close range
-        } else if (dtg < 7) {
-            goalChance = 0.14; // mid range
-        } else if (dtg < 10) {
-            goalChance = 0.09; // far mid
-        } else {
-            goalChance = 0.05; // very far
-        }
-
-        // GK save modifier — better saves when GK is near center of goal
-        if (oppGK) {
-            const gkDistToGoalLine = Math.abs(oppGK.col - gc);
-            const gkCenteredBonus = 1 - Math.min(Math.abs(oppGK.row - mr) / 8, 0.6);
-            if (gkDistToGoalLine < 3) {
-                // GK is well-positioned — reduce goal chance
-                goalChance *= (0.5 + (1 - gkCenteredBonus) * 0.5);
-            }
-        }
-
-        // Resolve shot
-        const shotRoll = Math.random();
-        if (shotRoll < goalChance) {
-            // GOAL!
-            this.matchScore[shooter.team]++;
-            this.stats.goals++;
-            const goalTypes = ['goal', 'screamer', 'header', 'volley', 'curler', 'chip', 'tap-in', 'rocket'];
-            const gt = pick(goalTypes);
-            this.addFeed({
-                time: formatTime(),
-                text: `<strong>${shooter.name}</strong> <span class="highlight-goal">scores a ${gt}!</span> ⚽🎉 [${this.matchScore.home}-${this.matchScore.away}]`,
-                type: 'goals',
-            });
-            setTimeout(() => this.ball.resetToCenter(), 2000);
-        } else {
-            // Miss / save
-            const saveChance = oppGK ? 0.5 : 0.1;
-            if (Math.random() < saveChance && oppGK) {
-                const saves = ['saved by the keeper', 'great save!', 'keeper tips it over', 'keeper dives to save', 'keeper holds on'];
-                this.addFeed({
-                    time: formatTime(),
-                    text: `<strong>${shooter.name}</strong> shoots — <strong>${oppGK.name}</strong> ${pick(saves)} 🧤`,
-                    type: 'chat',
-                });
-            } else {
-                const misses = ['goes wide', 'hits the post', 'blocked by a defender', 'sails over the bar', 'scuffs the shot'];
-                this.addFeed({
-                    time: formatTime(),
-                    text: `<strong>${shooter.name}</strong> shoots — ${pick(misses)}!`,
-                    type: 'chat',
-                });
-            }
-        }
-        this.onStatsUpdate?.(this.stats, this.matchScore);
-    }
-
-    doGameplay() {
-        if (!this.ball?.holder) return;
-        const h = this.ball.holder;
-        const P = CONFIG.PITCH;
-        const mr = (P.startRow + P.endRow) / 2;
-        const gc = h.team === 'home' ? P.endCol : P.startCol; // opponent goal column
-        const dtg = Math.abs(h.col - gc); // distance to goal
-        const tm = this.agents.filter(a => a.team === h.team && a.id !== h.id);
-        const opp = this.agents.filter(a => a.team !== h.team);
-        const nearestOpp = opp.reduce((cl, o) => distBetween(h, o) < distBetween(h, cl) ? o : cl, opp[0]);
-        const oppDist = nearestOpp ? distBetween(h, nearestOpp) : 99;
-        const isGK = h.position === 'GK';
-        const isDef = ['LB', 'CB'].includes(h.position);
-        const isMid = ['LM', 'CM', 'RM'].includes(h.position);
-        const isST = h.position === 'ST';
-
-        // === GOALKEEPER with ball → distribute to defender or midfielder ===
-        if (isGK) {
-            const targets = tm.filter(a => ['LB', 'CB', 'CM'].includes(a.position));
-            const t = targets.length > 0 ? targets[rand(0, targets.length - 1)] : pick(tm);
-            this.ball.passBall(t); h.actionCooldown = 80; this.stats.passes++;
-            this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> distributes to <strong>${t.name}</strong> 🧤`, type: 'chat' });
-            this.onStatsUpdate?.(this.stats, this.matchScore);
-            return;
-        }
-
-        // === Under heavy pressure (opponent very close) ===
-        if (oppDist < 3 && !isST) {
-            // Quick pass to nearest open teammate
-            const openTm = tm.filter(a => {
-                const nearOpp = opp.reduce((cl, o) => distBetween(a, o) < distBetween(a, cl) ? o : cl, opp[0]);
-                return distBetween(a, nearOpp) > 3;
-            });
-            if (openTm.length > 0) {
-                const t = openTm.reduce((best, a) => distBetween(h, a) < distBetween(h, best) ? a : best, openTm[0]);
-                this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> plays a quick pass to <strong>${t.name}</strong> under pressure`, type: 'chat' });
-            } else {
-                // No open teammate — try to dribble out
-                const dir = h.team === 'home' ? 1 : -1;
-                const nc = Math.max(P.startCol + 1, Math.min(P.endCol - 1, h.col + dir * rand(1, 2)));
-                const nr = Math.max(P.startRow + 1, Math.min(P.endRow - 1, h.row + rand(-2, 2)));
-                h.prevCol = h.col; h.prevRow = h.row;
-                h.targetCol = nc; h.targetRow = nr; h.moveProgress = 0; h.state = 'dribbling';
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> tries to dribble away from <strong>${nearestOpp.name}</strong>`, type: 'chat' });
-            }
-            this.onStatsUpdate?.(this.stats, this.matchScore);
-            return;
-        }
-
-        // === TACKLE ATTEMPT by nearby opponents ===
-        if (oppDist < 5 && Math.random() < 0.3) {
-            if (Math.random() < 0.45) {
-                this.ball.loose(h.col, h.row); nearestOpp.actionCooldown = 40;
-                this.addFeed({ time: formatTime(), text: `<strong>${nearestOpp.name}</strong> tackles <strong>${h.name}</strong> cleanly! 💪`, type: 'chat' });
-                if (Math.random() < 0.2) {
-                    this.stats.fouls++;
-                    this.addFeed({ time: formatTime(), text: `<strong>${nearestOpp.name}</strong> <span class="highlight-foul">fouls</span> <strong>${h.name}</strong> 🟨`, type: 'fouls' });
-                }
-            } else {
-                this.addFeed({ time: formatTime(), text: `<strong>${nearestOpp.name}</strong> attempts tackle on <strong>${h.name}</strong> — missed!`, type: 'chat' });
-            }
-            this.onStatsUpdate?.(this.stats, this.matchScore);
-            return;
-        }
-
-        // === POSITION-BASED DECISION MAKING ===
-        const roll = Math.random();
-
-        if (isDef) {
-            // Defenders: build from back — pass to midfielders or other defenders
-            const midTargets = tm.filter(a => ['CM', 'LM', 'RM'].includes(a.position));
-            const defTargets = tm.filter(a => ['LB', 'CB', 'RB'].includes(a.position));
-            if (roll < 0.5 && midTargets.length > 0) {
-                // Forward pass to midfielder
-                const t = midTargets[rand(0, midTargets.length - 1)];
-                this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> plays forward to <strong>${t.name}</strong>`, type: 'chat' });
-            } else if (roll < 0.75 && defTargets.length > 0) {
-                // Switch play across defense
-                const t = defTargets[rand(0, defTargets.length - 1)];
-                this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> switches play to <strong>${t.name}</strong> ↔️`, type: 'chat' });
-            } else {
-                // Carry forward
-                const dir = h.team === 'home' ? 1 : -1;
-                const nc = Math.max(P.startCol + 1, Math.min(P.endCol - 1, h.col + dir * rand(2, 4)));
-                const nr = Math.max(P.startRow + 1, Math.min(P.endRow - 1, h.row + rand(-2, 2)));
-                h.prevCol = h.col; h.prevRow = h.row;
-                h.targetCol = nc; h.targetRow = nr; h.moveProgress = 0; h.state = 'dribbling';
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> carries the ball forward`, type: 'chat' });
-            }
-        } else if (isMid) {
-            // Midfielders: link play — pass forward to strikers or through balls
-            const stTargets = tm.filter(a => a.position === 'ST');
-            const midTargets = tm.filter(a => ['CM', 'LM', 'RM'].includes(a.position) && a.id !== h.id);
-
-            if (roll < 0.35 && stTargets.length > 0) {
-                // Through ball to striker
-                const t = stTargets[rand(0, stTargets.length - 1)];
-                this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> threads a pass to <strong>${t.name}</strong> ⚡`, type: 'chat' });
-            } else if (roll < 0.55 && midTargets.length > 0) {
-                // Midfield interchange
-                const t = midTargets[rand(0, midTargets.length - 1)];
-                this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> finds <strong>${t.name}</strong> in space`, type: 'chat' });
-            } else if (roll < 0.7 && dtg < 14) {
-                // Long-range shot attempt
-                this.attemptShot(h, 'longrange');
-                return;
-            } else {
-                // Dribble forward
-                const dir = h.team === 'home' ? 1 : -1;
-                const nc = Math.max(P.startCol + 1, Math.min(P.endCol - 1, h.col + dir * rand(2, 5)));
-                const nr = Math.max(P.startRow + 1, Math.min(P.endRow - 1, h.row + rand(-3, 3)));
-                h.prevCol = h.col; h.prevRow = h.row;
-                h.targetCol = nc; h.targetRow = nr; h.moveProgress = 0; h.state = 'dribbling';
-                const no = opp.find(o => distBetween(h, o) < 4);
-                this.addFeed({ time: formatTime(), text: no ? `<strong>${h.name}</strong> dribbles past <strong>${no.name}</strong> 🔥` : `<strong>${h.name}</strong> drives forward`, type: 'chat' });
-            }
-        } else if (isST) {
-            // Strikers: goal-focused — shoot when close, pass to other striker or cut back
-            if (dtg < 10 && roll < 0.55) {
-                // Shoot on goal
-                this.attemptShot(h, 'normal');
-                return;
-            } else if (roll < 0.75) {
-                // Pass to partner striker or cut back to midfielder
-                const stPartner = tm.filter(a => a.position === 'ST');
-                const midTargets = tm.filter(a => ['CM', 'LM', 'RM'].includes(a.position));
-                const targets = stPartner.length > 0 ? stPartner : midTargets;
-                if (targets.length > 0) {
-                    const t = targets[rand(0, targets.length - 1)];
-                    this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                    const isLayoff = stPartner.includes(t);
-                    this.addFeed({
-                        time: formatTime(), text: isLayoff
-                            ? `<strong>${h.name}</strong> lays it off to <strong>${t.name}</strong>`
-                            : `<strong>${h.name}</strong> cuts back to <strong>${t.name}</strong>`, type: 'chat'
-                    });
-                } else {
-                    const t = pick(tm);
-                    this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-                    this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> passes back to <strong>${t.name}</strong>`, type: 'chat' });
-                }
-            } else {
-                // Dribble toward goal
-                const dir = h.team === 'home' ? 1 : -1;
-                const nc = Math.max(P.startCol + 1, Math.min(P.endCol - 1, h.col + dir * rand(2, 5)));
-                const nr = Math.max(P.startRow + 1, Math.min(P.endRow - 1, h.row + rand(-2, 2)));
-                h.prevCol = h.col; h.prevRow = h.row;
-                h.targetCol = nc; h.targetRow = nr; h.moveProgress = 0; h.state = 'dribbling';
-                const no = opp.find(o => distBetween(h, o) < 4);
-                this.addFeed({ time: formatTime(), text: no ? `<strong>${h.name}</strong> takes on <strong>${no.name}</strong> 🔥` : `<strong>${h.name}</strong> runs at the defense`, type: 'chat' });
-            }
-        } else {
-            // Fallback — generic pass
-            const t = pick(tm);
-            this.ball.passBall(t); h.actionCooldown = 50; this.stats.passes++;
-            this.addFeed({ time: formatTime(), text: `<strong>${h.name}</strong> passes to <strong>${t.name}</strong>`, type: 'chat' });
-        }
-        this.onStatsUpdate?.(this.stats, this.matchScore);
     }
 
     updateCamera() {
@@ -1656,38 +1030,38 @@ export class GameEngine {
     loop() {
         if (!this.running) return;
         this.tick++;
-        for (const a of this.agents) a.update(this.ball, this.agents);
-        if (this.ball) this.ball.update(this.agents);
+        // Smoothly interpolate agent and ball draw positions toward server-provided state
+        for (const a of this.agents) a.update();
+        if (this.ball) this.ball.update();
+        // Animate walkers (cosmetic only)
         for (const w of this.walkers) w.update();
-        // Respawn walkers that arrived — keep them on exterior roads/parking
         if (this.tick % 200 === 0) {
             for (const w of this.walkers) {
                 if (w.progress >= 1) {
                     const S = CONFIG.STADIUM;
                     const G = CONFIG.GRID_SIZE;
                     const side = rand(0, 3);
-                    if (side === 0) { // Top road
+                    if (side === 0) {
                         w.col = rand(S.startCol - 4, S.endCol + 4);
                         w.row = S.startRow - rand(3, 8);
                         w.targetCol = rand(S.startCol - 2, S.endCol + 2);
                         w.targetRow = S.startRow - 2;
-                    } else if (side === 1) { // Bottom road
+                    } else if (side === 1) {
                         w.col = rand(S.startCol - 4, S.endCol + 4);
                         w.row = S.endRow + rand(3, 8);
                         w.targetCol = rand(S.startCol - 2, S.endCol + 2);
                         w.targetRow = S.endRow + 2;
-                    } else if (side === 2) { // Left road
+                    } else if (side === 2) {
                         w.col = S.startCol - rand(3, 8);
                         w.row = rand(S.startRow - 4, S.endRow + 4);
                         w.targetCol = S.startCol - 2;
                         w.targetRow = rand(S.startRow - 2, S.endRow + 2);
-                    } else { // Right road
+                    } else {
                         w.col = S.endCol + rand(3, 8);
                         w.row = rand(S.startRow - 4, S.endRow + 4);
                         w.targetCol = S.endCol + 2;
                         w.targetRow = rand(S.startRow - 2, S.endRow + 2);
                     }
-                    // Clamp to grid
                     w.col = Math.max(2, Math.min(G - 3, w.col));
                     w.row = Math.max(2, Math.min(G - 3, w.row));
                     w.targetCol = Math.max(2, Math.min(G - 3, w.targetCol));
@@ -1697,52 +1071,6 @@ export class GameEngine {
             }
         }
         this.updateCamera();
-        // Match timer check (every ~1s)
-        if (Date.now() - this.lastTimerCheck > 1000) {
-            this.lastTimerCheck = Date.now();
-
-            if (this.matchPhase === 'playing') {
-                // Normal match countdown
-                const mt = this.getMatchTime();
-                this.matchTimeRemaining = mt.remaining;
-                this.onMatchUpdate?.({
-                    matchNumber: this.matchNumber,
-                    homeName: CONFIG.TEAMS.home.name,
-                    homeColor: CONFIG.TEAMS.home.colors[0],
-                    awayName: CONFIG.TEAMS.away.name,
-                    awayColor: CONFIG.TEAMS.away.colors[0],
-                    timeRemaining: mt.remaining,
-                    minutes: mt.minutes,
-                    seconds: mt.seconds,
-                    phase: 'playing',
-                });
-                if (mt.remaining <= 0 && !this.matchEnded) {
-                    this.beginIntermission();
-                }
-            } else if (this.matchPhase === 'intermission') {
-                // Lobby countdown
-                const lobbyRemaining = Math.max(0, this.intermissionEndTime - Date.now());
-                const lobbySec = Math.ceil(lobbyRemaining / 1000);
-                this.onMatchUpdate?.({
-                    matchNumber: this.matchNumber + 1,
-                    homeName: this.nextHomeTeam?.name || '???',
-                    homeColor: this.nextHomeTeam?.colors[0] || '#888',
-                    awayName: this.nextAwayTeam?.name || '???',
-                    awayColor: this.nextAwayTeam?.colors[0] || '#888',
-                    minutes: 0,
-                    seconds: lobbySec,
-                    phase: 'intermission',
-                    lobbyCountdown: lobbySec,
-                });
-                if (lobbyRemaining <= 0) {
-                    this.kickOffNewMatch();
-                }
-            }
-        }
-        if (this.matchPhase === 'playing' && !this.matchEnded && Date.now() - this.lastEventTime > CONFIG.EVENT_INTERVAL + rand(-400, 400)) {
-            this.doGameplay(); this.lastEventTime = Date.now();
-        }
-        if (this.tick % 30 === 0) this.onStatsUpdate?.(this.stats, this.matchScore);
         this.render();
         this.animFrame = requestAnimationFrame(() => this.loop());
     }
